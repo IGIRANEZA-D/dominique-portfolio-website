@@ -1,0 +1,92 @@
+{
+  "fullName": "IGIRANEZA Dominique",
+  "headline": "Business Analyst, AI and Data Storyteller",
+  "summary": "I build decision-ready data products: advanced dashboards, predictive models, and automation that move ideas from raw data to executive-ready insights.",
+  "contact": {
+    "email": "igdominik250@gmail.com",
+    "phone": "+250791029550",
+    "location": "Kigali, Rwanda",
+    "linkedin": "https://www.linkedin.com/in/igiraneza-dominique-73229b2aa",
+    "instagram": "https://www.instagram.com/1g.dominik/",
+    "whatsapp": "https://wa.me/250791029550"
+  },
+  "skills": [
+    "R",
+    "SQL",
+    "Power BI",
+    "Tableau",
+    "R Shiny",
+    "Statistics",
+    "Data storytelling",
+    "Training and mentoring",
+    "Research reporting",
+    "AI automation"
+  ],
+  "experience": [
+    {
+      "role": "Business Analyst",
+      "company": "Rama Consult",
+      "period": "Jan 2026 - Present",
+      "location": "Kigali, Rwanda",
+      "highlights": [
+        "Led advanced technical training in R, Power BI, SQL, and KoboToolbox",
+        "Built applied research pipelines from mobile collection to executive reporting",
+        "Designed institutional tracking systems and automated data structures",
+        "Translated analytics into strategic recommendations for consulting clients"
+      ]
+    },
+    {
+      "role": "Facilitator, AI Enthusiast and Data Scientist",
+      "company": "EduConnect Rwanda",
+      "period": "Sep 2022 - Nov 2025",
+      "location": "Kigali, Rwanda",
+      "highlights": [
+        "Delivered practical training in data analysis and visualization",
+        "Supported research from field collection through interpretation",
+        "Converted advanced analytics concepts into actionable learning material"
+      ]
+    },
+    {
+      "role": "Researcher and Data Analysis",
+      "company": "IPAR Rwanda",
+      "period": "Jul 2024 - Sep 2024",
+      "location": "Kigali, Rwanda",
+      "highlights": [
+        "Executed data cleaning, statistical analysis, and visualization tasks",
+        "Contributed trend interpretation for policy and institutional reports"
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "Store Sales Intelligence Command Center",
+      "stack": ["Power BI", "Revenue Monitoring", "Profit Diagnostics"],
+      "summary": "Multi-regional command center for commercial leadership with category contribution, shipment behavior, quantity movement, and profitability diagnostics."
+    },
+    {
+      "name": "Retail Outlet KPI Cockpit",
+      "stack": ["Excel", "Outlet Analysis", "KPI Cockpit"],
+      "summary": "KPI cockpit for outlet performance, item behavior, and category structure with fast filtering for daily management."
+    },
+    {
+      "name": "Sales and Profit Performance Matrix",
+      "stack": ["Excel", "Category Performance", "Profit Matrix"],
+      "summary": "Executive matrix for annual sales and profitability movement across categories, states, and customer behavior."
+    },
+    {
+      "name": "Sales Insights Interactive Workspace",
+      "stack": ["R Shiny", "Interactive UI", "Analytic Workspace"],
+      "summary": "Interactive workspace with guided analytic navigation and policy-facing interpretation."
+    },
+    {
+      "name": "Smart Export Analytics",
+      "stack": ["R Shiny", "Export Analytics", "Live Demo"],
+      "summary": "Live product focused on export analytics and strategic performance interpretation."
+    }
+  ],
+  "certifications": [
+    "AI Foundations",
+    "Advanced Excel",
+    "Data Science with R Programming"
+  ]
+}

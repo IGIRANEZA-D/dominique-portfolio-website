@@ -1,0 +1,32 @@
+IGIRANEZA Dominique
+Business Analyst, AI and Data Storyteller
+Location: Kigali, Rwanda
+Phone: +250791029550
+Email: igdominik250@gmail.com
+LinkedIn: https://www.linkedin.com/in/igiraneza-dominique-73229b2aa
+
+Professional profile:
+Business analyst and AI/data storyteller helping organizations move from raw data to decisions. Skilled in R, SQL, Power BI, Tableau, and R Shiny with a strong track record in executive dashboards, training delivery, and research-backed recommendations.
+
+Experience:
+- Business Analyst, Rama Consult (Jan 2026 - Present, Kigali, Rwanda)
+  Led advanced training in R, Power BI, SQL, and KoboToolbox.
+  Built institutional research pipelines from collection to executive reporting.
+  Designed tracking systems and automation for consistency and compliance.
+
+- Facilitator, AI Enthusiast and Data Scientist, EduConnect Rwanda (Sep 2022 - Nov 2025, Kigali, Rwanda)
+  Delivered practical training in analysis, statistical software, and visualization.
+  Supported applied research and created learner-friendly analytics materials.
+
+- Researcher and Data Analysis, IPAR Rwanda (Jul 2024 - Sep 2024, Kigali, Rwanda)
+  Performed cleaning, statistical analysis, and visualization for policy outputs.
+
+Core capabilities:
+R, SQL, Statistics, Power BI, Tableau, R Shiny, dashboard design, data storytelling, training and mentoring, research reporting, AI automation.
+
+Portfolio highlights:
+- Store Sales Intelligence Command Center (Power BI)
+- Retail Outlet KPI Cockpit (Excel)
+- Sales and Profit Performance Matrix (Excel)
+- Sales Insights Interactive Workspace (R Shiny)
+- Smart Export Analytics (R Shiny live product)
