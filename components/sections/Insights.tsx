@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Section } from '@/components/ui/Section';
 import { INSIGHTS, PIPELINE } from '@/data/portfolio';
@@ -11,7 +11,7 @@ export function Insights() {
     <Section id="insights" title="Data stories" subtitle="Dashboard-grade visuals backed by Recharts." className="bg-slate-50 dark:bg-slate-900/60">
       <div className="grid md:grid-cols-2 gap-6">
         <motion.div
-          className="p-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-sm"
+          className="p-4 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-sm"
           initial={{ opacity: 0, y: 12 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
@@ -21,9 +21,9 @@ export function Insights() {
               <p className="text-sm text-slate-500">AI Automation Builder</p>
               <h3 className="text-lg font-semibold">Forecast accuracy</h3>
             </div>
-            <Badge variant="primary" size="sm">AI AUTOMATION BUILDER</Badge>
+            <Badge variant="primary" size="sm" className="hidden sm:inline-block">AI AUTOMATION BUILDER</Badge>
           </div>
-          <div className="h-64">
+          <div className="h-56 sm:h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={INSIGHTS} margin={{ top: 10, right: 10, left: -14, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="4 4" strokeOpacity={0.3} />
@@ -41,7 +41,7 @@ export function Insights() {
         </motion.div>
 
         <motion.div
-          className="p-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-sm"
+          className="p-4 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-sm"
           initial={{ opacity: 0, y: 12 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
@@ -51,11 +51,11 @@ export function Insights() {
               <p className="text-sm text-slate-500">Sales Dashboard Analysis</p>
               <h3 className="text-lg font-semibold">Pipeline health</h3>
             </div>
-            <Badge variant="secondary" size="sm">SALES DASHBOARD ANALYSIS</Badge>
+            <Badge variant="secondary" size="sm" className="hidden sm:inline-block">SALES DASHBOARD ANALYSIS</Badge>
           </div>
-          <div className="h-64">
+          <div className="h-56 sm:h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={PIPELINE} layout="vertical" margin={{ left: 50 }}>
+              <BarChart data={PIPELINE} layout="vertical" margin={{ left: 36 }}>
                 <CartesianGrid strokeDasharray="4 4" strokeOpacity={0.3} />
                 <XAxis type="number" stroke="currentColor" opacity={0.5} tickLine={false} axisLine={false} />
                 <YAxis type="category" dataKey="label" stroke="currentColor" opacity={0.6} tickLine={false} axisLine={false} />

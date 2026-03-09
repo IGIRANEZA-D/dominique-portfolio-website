@@ -9,7 +9,7 @@ const ENV_PATH = path.join(ROOT_DIR, '.env');
 loadEnvFile(ENV_PATH);
 
 const CONFIG = {
-  port: Number(process.env.PORT || 8787),
+  port: Number(process.env.PORT || 8080),
   host: process.env.HOST || '0.0.0.0',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-latest',

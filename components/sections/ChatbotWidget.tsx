@@ -52,13 +52,13 @@ export function ChatbotWidget() {
   };
 
   return (
-    <div id="ai-assistant" className="fixed bottom-6 right-6 z-50">
+    <div id="ai-assistant" className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50">
       {/* AI Assistant Button with Pulse Animation */}
       <motion.button
         onClick={() => setOpen((o) => !o)}
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.95 }}
-        className="relative h-14 w-14 rounded-full bg-gradient-to-r from-amber-500 to-amber-300 text-slate-900 shadow-2xl flex items-center justify-center hover:shadow-amber-400/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-400 transition-shadow"
+        className="relative h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-gradient-to-r from-amber-500 to-amber-300 text-slate-900 shadow-2xl flex items-center justify-center hover:shadow-amber-400/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-400 transition-shadow"
         aria-label="Open Dominik AI Assistant"
       >
         {/* Pulse Ring */}
@@ -84,10 +84,10 @@ export function ChatbotWidget() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.3 }}
-            className="w-[340px] sm:w-[400px] h-[500px] mt-4 rounded-2xl border border-white/10 bg-slate-900 text-slate-100 shadow-2xl shadow-black/40 flex flex-col overflow-hidden"
+            className="mt-3 sm:mt-4 w-[min(400px,calc(100vw-1rem))] h-[min(75vh,500px)] sm:h-[500px] rounded-2xl border border-white/10 bg-slate-900 text-slate-100 shadow-2xl shadow-black/40 flex flex-col overflow-hidden"
           >
             {/* Header - Professional Branding */}
-            <div className="px-4 py-4 border-b border-white/10 bg-slate-800/80">
+            <div className="px-3 sm:px-4 py-3 sm:py-4 border-b border-white/10 bg-slate-800/80">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <div className="h-8 w-8 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 flex items-center justify-center text-white">
@@ -106,7 +106,7 @@ export function ChatbotWidget() {
             </div>
 
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto space-y-3 px-4 py-4">
+            <div className="flex-1 overflow-y-auto space-y-3 px-3 sm:px-4 py-3 sm:py-4">
               {messages.map((msg, idx) => (
                 <motion.div
                   key={idx}
@@ -140,7 +140,7 @@ export function ChatbotWidget() {
             </div>
 
             {/* Suggestions & Input Area */}
-            <div className="px-4 pb-4 space-y-3 border-t border-white/10 bg-slate-900/70">
+            <div className="px-3 sm:px-4 pb-3 sm:pb-4 space-y-3 border-t border-white/10 bg-slate-900/70">
               <div className="flex gap-2 flex-wrap">
                 {SUGGESTIONS.map((s) => (
                   <motion.button
@@ -148,7 +148,7 @@ export function ChatbotWidget() {
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => setInput(s)}
-                    className="text-xs px-3 py-1.5 rounded-full border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors font-medium"
+                    className="text-xs px-3 py-1.5 rounded-full border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors font-medium max-w-full"
                   >
                     {s}
                   </motion.button>
@@ -183,4 +183,3 @@ export function ChatbotWidget() {
     </div>
   );
 }
-

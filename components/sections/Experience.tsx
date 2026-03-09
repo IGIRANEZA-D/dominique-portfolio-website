@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
@@ -29,7 +29,7 @@ export function Experience() {
                 <div className="absolute left-0 md:left-1.5 top-3 h-9 w-9 rounded-full bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 flex items-center justify-center shadow-sm">
                   <Briefcase className="h-4 w-4 text-blue-600" />
                 </div>
-                <Card className="p-6">
+                <Card className="p-4 sm:p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-sm text-slate-500">{role.period}</p>

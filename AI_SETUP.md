@@ -1,43 +1,61 @@
 # Dominik AI Assistant Setup
 
-## 1) Configure environment
-1. Copy `.env.example` to `.env`.
-2. Set `GEMINI_API_KEY` (recommended) and/or `HF_API_TOKEN`.
-3. (Optional) adjust model and generation settings.
+## Frontend choice
+This project should be served from `index.html`.
 
-Important for new Hugging Face router:
-- Your token must include permission for **Inference Providers**.
-- If this permission is missing, the app will automatically use fallback answers (portfolio context + general summaries).
+The supported deployment path is:
+- static portfolio frontend: `index.html`
+- AI backend + static file server: `server.js`
+
+Do not deploy the Next.js app if you want the exact `index.html` look.
+
+## 1) Configure environment
+1. Copy `.env.example` to `.env` if needed.
+2. Set `GEMINI_API_KEY` (recommended) and/or `HF_API_TOKEN`.
+3. Keep `PORT=8080` unless your hosting provider sets `PORT` automatically.
+
+Important for Hugging Face:
+- Your token must include permission for `Inference Providers`.
+- If that permission is missing, the assistant falls back to local portfolio knowledge.
 
 Provider order at runtime:
-1. Gemini (if configured)
-2. Hugging Face (if configured)
-3. Intelligent fallback
+1. Gemini
+2. Hugging Face
+3. Local fallback
 
-## 2) Start AI server
-Run:
+## 2) Start the correct server
+Run either:
 
 ```bash
-npm run serve:ai
+npm run dev
+```
+
+or:
+
+```bash
+npm start
 ```
 
 Open:
-- `http://localhost:8787` for the portfolio site
-- `http://localhost:8787/api/health` for server health
+- `http://localhost:8080` for the exact portfolio you want
+- `http://localhost:8080/api/health` for AI server health
 
-## 3) Keep assistant knowledge updated
-The chatbot reads local files:
+## 3) How the assistant works
+`index.html` sends assistant requests to:
+
+```text
+/api/chat
+```
+
+That endpoint is handled by `server.js`, so the frontend and AI stay on the same origin in deployment.
+
+## 4) Keep assistant knowledge updated
+The chatbot reads:
 - `data/assistant-profile.json`
 - `data/cv.txt`
 - `data/linkedin-posts.json`
 
 After editing these files, restart the server.
 
-## 4) LinkedIn content updates
-Direct scraping from LinkedIn is unreliable and often blocked.  
-Use a clean export/manual sync approach:
-1. Copy your latest post summaries into `data/linkedin-posts.json`.
-2. Include `date`, `topic`, `summary`, optional `tags`, and `url`.
-3. Restart the server.
-
-This gives stable, accurate answers while keeping your assistant professional and controlled.
+## 5) Deployment rule
+If you want production to match `http://localhost:8080`, deploy the Node server defined by `server.js` and make sure the root path `/` serves `index.html`.

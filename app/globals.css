@@ -1,15 +1,22 @@
-@tailwind base;
+﻿@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 80px;
+  max-width: 100%;
+  overflow-x: hidden;
+}
 
 body {
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  max-width: 100%;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 16% 18%, rgba(249,115,22,0.12) 0, transparent 32%),
     radial-gradient(circle at 82% 8%, rgba(251,146,60,0.10) 0, transparent 34%),
@@ -78,15 +85,15 @@ pre {
   }
 
   .section-padding {
-    @apply py-16 md:py-24 px-4 md:px-6 lg:px-8;
+    @apply px-4 py-14 sm:px-5 sm:py-16 md:px-6 md:py-24 lg:px-8;
   }
 
   .section-title {
-    @apply text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-2;
+    @apply mb-2 text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl md:text-4xl;
   }
 
   .section-subtitle {
-    @apply text-lg text-gray-600 dark:text-gray-400 mb-12;
+    @apply mb-8 text-base text-gray-600 dark:text-gray-400 sm:mb-12 sm:text-lg;
   }
 }
 

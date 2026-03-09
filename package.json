@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint",
+    "dev": "node server.js",
+    "build": "node -e \"console.log('No build step required for static portfolio server.')\"",
+    "start": "node server.js",
+    "lint": "node -e \"console.log('Lint not configured for static portfolio deployment path.')\"",
     "serve:ai": "node server.js"
   },
   "dependencies": {

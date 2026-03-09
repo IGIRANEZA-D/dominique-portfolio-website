@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { motion } from 'framer-motion';
 import Image from 'next/image';
@@ -20,14 +20,14 @@ export function Hero() {
         <div className="space-y-6">
           <div className="inline-flex items-center gap-2 rounded-full bg-amber-500/15 border border-amber-300/30 px-3 py-1 shadow-sm backdrop-blur">
             <Sparkles className="h-4 w-4 text-amber-300" />
-            <span className="text-sm text-slate-100">Data · AI · Automation Engineer</span>
+            <span className="text-sm text-slate-100">Data Â· AI Â· Automation Engineer</span>
           </div>
 
           <motion.h1
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.45 }}
-            className="text-4xl md:text-5xl lg:text-6xl font-black leading-[1.05] text-amber-100"
+            className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black leading-[1.05] text-amber-100"
           >
             Building Intelligence with Data, Automation &amp; AI
           </motion.h1>
@@ -36,24 +36,24 @@ export function Hero() {
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.05 }}
-            className="text-lg text-slate-200 max-w-2xl"
+            className="text-base sm:text-lg text-slate-200 max-w-2xl"
           >
             {PORTFOLIO.subheadline}
           </motion.p>
 
-          <div className="flex flex-wrap gap-3">
-            <a href="#projects">
-              <Button variant="primary" size="lg" icon={<ArrowRight className="h-4 w-4" />}>
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
+            <a href="#projects" className="w-full sm:w-auto">
+              <Button variant="primary" size="lg" icon={<ArrowRight className="h-4 w-4" />} className="w-full sm:w-auto">
                 View Projects
               </Button>
             </a>
-            <a href={PORTFOLIO.cv_url} download>
-              <Button variant="secondary" size="lg" icon={<Download className="h-4 w-4" />}>
+            <a href={PORTFOLIO.cv_url} download className="w-full sm:w-auto">
+              <Button variant="secondary" size="lg" icon={<Download className="h-4 w-4" />} className="w-full sm:w-auto">
                 Download CV
               </Button>
             </a>
-            <a href="#contact">
-              <Button variant="outline" size="lg" icon={<Mail className="h-4 w-4" />}>
+            <a href="#contact" className="w-full sm:w-auto">
+              <Button variant="outline" size="lg" icon={<Mail className="h-4 w-4" />} className="w-full sm:w-auto">
                 Contact Me
               </Button>
             </a>
@@ -77,7 +77,7 @@ export function Hero() {
         >
           <div className="absolute inset-0 rounded-3xl bg-white/50 dark:bg-slate-900/50 blur-2xl" aria-hidden />
           <div className="relative rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-950/90 backdrop-blur shadow-2xl overflow-hidden">
-            <div className="p-6 pb-4 flex items-start justify-between">
+            <div className="p-4 sm:p-6 sm:pb-4 flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-[0.24em] text-blue-500">Profile</p>
                 <p className="text-xl font-semibold">{PORTFOLIO.name}</p>
@@ -86,7 +86,7 @@ export function Hero() {
               <Badge variant="primary">Available</Badge>
             </div>
 
-            <div className="px-6">
+            <div className="px-4 sm:px-6">
               <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-gradient-to-br from-blue-50 to-white dark:from-slate-900 dark:to-slate-950">
                 <Image
                   src="/images/hero.png"
@@ -99,7 +99,7 @@ export function Hero() {
               </div>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-4 sm:p-6 space-y-4">
               <div className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4 bg-slate-50/70 dark:bg-slate-900/60">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg">
@@ -115,7 +115,7 @@ export function Hero() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {featuredPersonas.map((persona) => (
                   <div key={persona.id} className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 bg-slate-50 dark:bg-slate-900/80">
                     <p className="text-xs font-semibold text-slate-600 dark:text-slate-200">{persona.title}</p>

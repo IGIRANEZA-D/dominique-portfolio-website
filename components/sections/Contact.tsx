@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from 'react';
 import { Mail, Phone, Linkedin } from 'lucide-react';
@@ -22,27 +22,27 @@ export function Contact() {
 
   return (
     <Section id="contact" title="Contact" subtitle="Reach out for collaborations, freelance, or speaking.">
-      <div className="grid md:grid-cols-[1fr_1.1fr] gap-8 items-start">
-        <div className="space-y-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-6 shadow-sm">
+      <div className="grid md:grid-cols-[1fr_1.1fr] gap-6 md:gap-8 items-start">
+        <div className="space-y-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-4 sm:p-6 shadow-sm">
           <h3 className="text-lg font-semibold">Direct lines</h3>
           <div className="flex items-center gap-3 text-slate-700 dark:text-slate-200">
             <Mail className="h-5 w-5 text-blue-500" />
-            <a href={`mailto:${PORTFOLIO.email}`} className="hover:underline">{PORTFOLIO.email}</a>
+            <a href={`mailto:${PORTFOLIO.email}`} className="hover:underline break-all text-sm sm:text-base">{PORTFOLIO.email}</a>
           </div>
           <div className="flex items-center gap-3 text-slate-700 dark:text-slate-200">
             <Phone className="h-5 w-5 text-blue-500" />
-            <a href="tel:+250788000000" className="hover:underline">{PORTFOLIO.phone}</a>
+            <a href="tel:+250788000000" className="hover:underline break-all text-sm sm:text-base">{PORTFOLIO.phone}</a>
           </div>
           <div className="flex items-center gap-3 text-slate-700 dark:text-slate-200">
             <Linkedin className="h-5 w-5 text-blue-500" />
-            <a href={PORTFOLIO.social.linkedin} target="_blank" rel="noreferrer" className="hover:underline">
+            <a href={PORTFOLIO.social.linkedin} target="_blank" rel="noreferrer" className="hover:underline break-words text-sm sm:text-base">
               LinkedIn Profile
             </a>
           </div>
         </div>
 
         <form
-          className="p-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-sm space-y-4"
+          className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-4 sm:p-6 shadow-sm space-y-4"
           onSubmit={handleSubmit}
           aria-label="Contact form"
         >

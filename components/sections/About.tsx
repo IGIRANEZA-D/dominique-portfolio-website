@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { motion } from 'framer-motion';
 import { Badge } from '@/components/ui/Badge';
@@ -28,11 +28,11 @@ export function About() {
           <div className="space-y-4">
             <Badge variant="secondary">About Dominique</Badge>
             <h2 className="section-title">Strategy, statistics, and systems that stay shipped</h2>
-            <p className="text-lg text-slate-600 dark:text-slate-300 leading-relaxed">
+            <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300 leading-relaxed">
               {PORTFOLIO.bio}
             </p>
             <p className="text-slate-600 dark:text-slate-300">
-              I partner with product, RevOps, and research teams to translate ambiguous questions into measurable outcomes—
+              I partner with product, RevOps, and research teams to translate ambiguous questions into measurable outcomesâ€”
               from prototyping to production, with governance built in.
             </p>
           </div>

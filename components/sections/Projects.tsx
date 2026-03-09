@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -52,7 +52,7 @@ export function Projects() {
               >
                 <Card className="p-0 overflow-hidden flex flex-col h-full hover:shadow-2xl transition-shadow duration-300">
                   {/* Image Container with Overlay */}
-                  <div className="relative h-64 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+                  <div className="relative h-56 sm:h-64 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
                     <motion.img
                       src={project.image}
                       alt={project.title}
@@ -91,7 +91,7 @@ export function Projects() {
                   </div>
 
                   {/* Content */}
-                  <div className="p-6 flex-1 flex flex-col gap-4">
+                  <div className="p-4 sm:p-6 flex-1 flex flex-col gap-4">
                     <div>
                       <h3 className="text-lg font-bold text-slate-900 dark:text-white">{project.title}</h3>
                       <p className="text-slate-600 dark:text-slate-300 text-sm mt-2 leading-relaxed">{project.description}</p>
@@ -144,7 +144,7 @@ export function Projects() {
                           whileTap={{ scale: 0.95 }}
                           className="text-sm font-semibold text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white transition-colors"
                         >
-                          Case Study →
+                          Case Study â†’
                         </motion.a>
                       )}
                     </div>
