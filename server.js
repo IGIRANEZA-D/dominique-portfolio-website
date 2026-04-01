@@ -11,6 +11,7 @@ loadEnvFile(ENV_PATH);
 const CONFIG = {
   port: Number(process.env.PORT || 8080),
   host: process.env.HOST || '0.0.0.0',
+  geminiOnly: String(process.env.GEMINI_ONLY || '').trim() === '1',
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-20241022',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
@@ -1064,7 +1065,17 @@ function isLikelyPortfolioQuery(question, contextChunks, history = []) {
 
 function isDynamicQuery(question) {
   const msg = String(question || '').toLowerCase();
-  return msg.includes('time') || msg.includes('date') || msg.includes('day today') || msg.includes('today');
+  return (
+    msg.includes('time') ||
+    msg.includes('date') ||
+    msg.includes('day today') ||
+    msg.includes('today') ||
+    msg.includes('right now') ||
+    msg.includes('now') ||
+    msg.includes('latest') ||
+    msg.includes('current') ||
+    msg.includes('trending')
+  );
 }
 
 function tryNativeUtilityAnswer(question) {
@@ -1154,10 +1165,19 @@ function normalizeQuestionText(question) {
   return String(question || '')
     .replace(/[,;]\s*(answer|explain|reply)\s+(very\s+)?(quick|quickly|short|briefly)\b/gi, '')
     .replace(/\b(answer|explain|reply)\s+(very\s+)?(quick|quickly|short|briefly)\b/gi, '')
+    .replace(/\b(right now|latest|current|trending|now)\b/gi, '')
     .replace(/\bplease\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+function stripTrendPhrases(text) {
+  return String(text || '')
+    .replace(/\b(top|best|popular|trending|latest|current|right now|now|today)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 
 function normalizeGeneralTopic(topic) {
   let candidate = String(topic || '')
@@ -1167,6 +1187,8 @@ function normalizeGeneralTopic(topic) {
   if (!candidate) return '';
 
   const lower = candidate.toLowerCase();
+  if (lower.includes('lwarning')) return 'Machine learning';
+  if (lower.includes('machin learn') || lower.includes('machine learn')) return 'Machine learning';
   if (lower === 'ai' || lower === 'a.i') return 'Artificial intelligence';
   if (lower === 'z test' || lower === 'z-test' || lower === 'ztest') return 'Z-test';
   if (lower === 'space x') return 'SpaceX';
@@ -1179,6 +1201,18 @@ function extractGeneralTopic(question) {
   const raw = normalizeQuestionText(question);
   if (!raw) return '';
   const lower = raw.toLowerCase().replace(/[?!.]+$/g, '').trim();
+
+  const cleaned = stripTrendPhrases(lower);
+  if (/\b(rwandan|kenyan|ugandan|tanzanian|nigerian|ghanaian|south african|ethiopian)\b/.test(cleaned)) {
+    const category = cleaned.match(/\b(music|songs?|artists?|musicians|movies?|films?|sports?|teams?)\b/);
+    if (category) {
+      const adjective = cleaned.match(/\b(rwandan|kenyan|ugandan|tanzanian|nigerian|ghanaian|south african|ethiopian)\b/);
+      if (adjective && adjective[1]) {
+        const base = category[1].startsWith('song') ? 'music' : category[1].startsWith('movie') || category[1].startsWith('film') ? 'film' : category[1];
+        return normalizeGeneralTopic(`${adjective[1]} ${base}`);
+      }
+    }
+  }
 
   const ownerMatch = lower.match(/\b(?:owner|founder|ceo|capital|currency|president|population)\s+of\s+(.+)$/i);
   if (ownerMatch && ownerMatch[1]) {
@@ -1195,7 +1229,47 @@ function extractGeneralTopic(question) {
     return normalizeGeneralTopic(whatIsMatch[1]);
   }
 
-  return normalizeGeneralTopic(raw);
+  return normalizeGeneralTopic(stripTrendPhrases(raw));
+}
+
+function extractKeywords(text) {
+  const stop = new Set([
+    'the','and','for','with','from','that','this','what','when','where','which','who','why','how','you','your','are','have','has','had','can','will','would','should','could','about','tell','me','please','is','it','of','to','in','on','at','by','an','a'
+  ]);
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !stop.has(w));
+}
+
+function isReferenceRelevant(question, answer) {
+  const qKeywords = extractKeywords(question);
+  const aKeywords = extractKeywords(answer);
+  if (!qKeywords.length || !aKeywords.length) return false;
+  const aSet = new Set(aKeywords);
+  const overlap = qKeywords.filter((w) => aSet.has(w));
+  const overlapRatio = overlap.length / Math.max(1, qKeywords.length);
+  if (overlap.length === 0 || overlapRatio < 0.08) return false;
+
+  const categoryGroups = [
+    ['music','song','songs','artist','artists','musician','musicians'],
+    ['movie','movies','film','films','cinema','actor','actors'],
+    ['sport','sports','team','teams','league','match','matches'],
+    ['tech','technology','software','ai','artificial','intelligence'],
+  ];
+  for (const group of categoryGroups) {
+    const qHas = group.some((w) => qKeywords.includes(w));
+    const aHas = group.some((w) => aKeywords.includes(w));
+    if (qHas && !aHas) return false;
+  }
+
+  const mismatchFlags = ['genocide','war','killed','massacre','rape'];
+  const qIsMusic = qKeywords.includes('music') || qKeywords.includes('song') || qKeywords.includes('songs');
+  const aHasMismatch = mismatchFlags.some((w) => aKeywords.includes(w));
+  if (qIsMusic && aHasMismatch) return false;
+
+  return true;
 }
 
 function extractComparisonTopics(question) {
@@ -1469,6 +1543,9 @@ async function tryFastLocalGeneralAnswer(question, history = []) {
   if (conversationalReply) return conversationalReply;
   const nativeAnswer = tryNativeUtilityAnswer(resolvedMessage);
   if (nativeAnswer) return nativeAnswer;
+  if (isDynamicQuery(resolvedMessage)) {
+    return 'That needs live, up-to-date data. If you want, I can answer a non-real-time version (for example: popular Rwandan music genres or classic artists), or you can enable a live data source.';
+  }
 
   const practicalGuidance = buildPracticalGuidance(message, history);
   if (practicalGuidance) return practicalGuidance;
@@ -1499,9 +1576,12 @@ async function tryFastLocalGeneralAnswer(question, history = []) {
     if (isAmbiguousPronounQuestion(message, history)) {
       return 'Please mention the person or subject you mean, so I can answer accurately.';
     }
+    if (isDynamicQuery(resolvedMessage)) {
+      return 'That is a live or trending question. I can answer if you want a general, non-real-time summary, or I can use a live data source if enabled.';
+    }
     try {
       const externalAnswer = await queryAnyGeneralReference(resolvedMessage);
-      if (externalAnswer) return externalAnswer;
+      if (externalAnswer && isReferenceRelevant(resolvedMessage, externalAnswer)) return externalAnswer;
     } catch (_) {
       // Ignore and continue.
     }
@@ -1518,6 +1598,9 @@ async function smartFallbackReply(question, contextChunks, providerErrors, histo
   if (conversationalReply) return conversationalReply;
   const nativeAnswer = tryNativeUtilityAnswer(resolvedMessage);
   if (nativeAnswer) return nativeAnswer;
+  if (isDynamicQuery(resolvedMessage)) {
+    return 'That is a live or trending question. I can answer a general, non-real-time version or use a live data source if enabled.';
+  }
 
   if (isLikelyPortfolioQuery(message, contextChunks, history)) {
     const directAnswer = extractProfileAnswerFromData(message, history);
@@ -1606,7 +1689,7 @@ async function queryBestProvider(question, history, contextChunks) {
   const geminiBlocked = providerState.geminiCooldownUntil > now;
   const hfBlocked = providerState.hfCooldownUntil > now;
 
-  if (CONFIG.anthropicApiKey && !anthropicBlocked) {
+  if (!CONFIG.geminiOnly && CONFIG.anthropicApiKey && !anthropicBlocked) {
     try {
       const reply = await queryAnthropic(prompt, maxTokens, CONFIG.anthropicModel);
       if (reply && !looksTruncatedReply(reply, question)) {
@@ -1625,12 +1708,12 @@ async function queryBestProvider(question, history, contextChunks) {
         providerState.anthropicCooldownUntil = Date.now() + 20 * 1000;
       }
     }
-  } else if (anthropicBlocked) {
+  } else if (!CONFIG.geminiOnly && anthropicBlocked) {
     const sec = Math.max(1, Math.ceil((providerState.anthropicCooldownUntil - now) / 1000));
     const reason = `cooling down for ${sec}s due to recent failures`;
     logProviderFailure('Anthropic', new Error(reason));
     errors.push(`Anthropic: ${reason}`);
-  } else {
+  } else if (!CONFIG.geminiOnly) {
     const reason = 'not configured';
     logProviderFailure('Anthropic', new Error(reason));
     errors.push(`Anthropic: ${reason}`);
@@ -1664,7 +1747,7 @@ async function queryBestProvider(question, history, contextChunks) {
     errors.push(`Gemini: ${reason}`);
   }
 
-  if (CONFIG.hfToken && !hfBlocked) {
+  if (!CONFIG.geminiOnly && CONFIG.hfToken && !hfBlocked) {
     try {
       const reply = await queryHuggingFace(prompt, maxTokens);
       if (looksTruncatedReply(reply, question)) {
@@ -1682,12 +1765,12 @@ async function queryBestProvider(question, history, contextChunks) {
         providerState.hfCooldownUntil = Date.now() + HF_TEMP_COOLDOWN_MS;
       }
     }
-  } else if (hfBlocked) {
+  } else if (!CONFIG.geminiOnly && hfBlocked) {
     const sec = Math.max(1, Math.ceil((providerState.hfCooldownUntil - now) / 1000));
     const reason = `cooling down for ${sec}s due to recent failures`;
     logProviderFailure('HuggingFace', new Error(reason));
     errors.push(`HuggingFace: ${reason}`);
-  } else {
+  } else if (!CONFIG.geminiOnly) {
     const reason = 'not configured';
     logProviderFailure('HuggingFace', new Error(reason));
     errors.push(`HuggingFace: ${reason}`);
