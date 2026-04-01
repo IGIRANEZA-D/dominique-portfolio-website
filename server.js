@@ -11,6 +11,8 @@ loadEnvFile(ENV_PATH);
 const CONFIG = {
   port: Number(process.env.PORT || 8080),
   host: process.env.HOST || '0.0.0.0',
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
+  anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-20241022',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-latest',
   geminiFallbackModels: (process.env.GEMINI_FALLBACK_MODELS || 'gemini-flash-lite-latest,gemini-2.5-flash-lite,gemini-3-flash-preview')
@@ -44,7 +46,9 @@ const knowledge = buildKnowledgeBase();
 const responseCache = new Map();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const CACHE_MAX_ITEMS = 200;
+const CACHE_SCHEMA_VERSION = 'v2';
 const providerState = {
+  anthropicCooldownUntil: 0,
   geminiCooldownUntil: 0,
   hfCooldownUntil: 0,
 };
@@ -52,6 +56,10 @@ const AI_UNAVAILABLE_MESSAGE = 'Dominik AI Assistant is temporarily unavailable.
 const HF_PERMISSION_COOLDOWN_MS = 10 * 60 * 1000;
 const HF_TEMP_COOLDOWN_MS = 60 * 1000;
 const GENERAL_REF_MAX_CHARS = 1400;
+const ANTHROPIC_REQUEST_TIMEOUT_MS = Math.max(1800, Math.min(CONFIG.hfTimeoutMs, Number(process.env.ANTHROPIC_REQUEST_TIMEOUT_MS || 4500)));
+const GEMINI_REQUEST_TIMEOUT_MS = Math.max(1800, Math.min(CONFIG.hfTimeoutMs, Number(process.env.GEMINI_REQUEST_TIMEOUT_MS || 4200)));
+const HF_REQUEST_TIMEOUT_MS = Math.max(1800, Math.min(CONFIG.hfTimeoutMs, Number(process.env.HF_REQUEST_TIMEOUT_MS || 3200)));
+const MAX_GEMINI_MODELS = Math.max(1, Math.min(2, Number(process.env.GEMINI_MAX_MODELS || 1)));
 
 function toErrorMessage(error) {
   return error && error.message ? String(error.message) : String(error);
@@ -334,6 +342,198 @@ function buildPrompt({ question, history, contextChunks, mode }) {
   ].join('\n');
 }
 
+function getRecentHistoryText(history, limit = 6) {
+  if (!Array.isArray(history) || !history.length) return '';
+  return history
+    .slice(-limit)
+    .map((item) => String(item && item.content ? item.content : ''))
+    .join(' ')
+    .toLowerCase();
+}
+
+function historyMentionsDominique(history) {
+  const text = getRecentHistoryText(history);
+  if (!text) return false;
+  return /\b(dominique|dominik|igiraneza|rama consult|portfolio|projects?|experience|skills?)\b/.test(text);
+}
+
+function extractHistorySubject(history, limit = 6) {
+  if (!Array.isArray(history) || !history.length) return '';
+  const recent = history.slice(-limit).reverse();
+  const patterns = [
+    /\b(?:who is|who was|tell me about|tell me something about|about|describe|explain)\s+([A-Z][A-Za-z.-]*(?:\s+[A-Z][A-Za-z.-]*){0,3})\b/i,
+    /\b([A-Z][A-Za-z.-]*(?:\s+[A-Z][A-Za-z.-]*){0,3})\s+(?:is|was|are|were)\b/,
+  ];
+
+  for (const item of recent) {
+    const text = String(item && item.content ? item.content : '').trim();
+    if (!text) continue;
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        const candidate = match[1].trim();
+        if (!/^(What|Where|Why|How|When|Tell|Explain|Describe)$/i.test(candidate)) {
+          return candidate;
+        }
+      }
+    }
+    const genericNames = text.match(/\b[A-Z][A-Za-z.-]*(?:\s+[A-Z][A-Za-z.-]*){1,3}\b/g) || [];
+    const candidate = genericNames.find((name) => !/^(What|Where|Why|How|When|Tell|Explain|Describe|South Africa|East Africa)$/i.test(name));
+    if (candidate) return candidate.trim();
+  }
+  return '';
+}
+
+function resolveQuestionSubject(question, history = []) {
+  const raw = String(question || '').trim();
+  if (!raw) return '';
+  if (/\b(dominique|dominik|igiraneza)\b/i.test(raw)) return 'IGIRANEZA Dominique';
+  return extractHistorySubject(history);
+}
+
+function rewritePronounQuestion(question, history = []) {
+  const raw = String(question || '').trim();
+  if (!raw) return '';
+  if (!/\b(he|his|him|she|her|they|their|them)\b/i.test(raw)) return raw;
+  const subject = resolveQuestionSubject(raw, history);
+  if (!subject) return raw;
+  return raw
+    .replace(/\bwhere is he\b/i, `where is ${subject}`)
+    .replace(/\bwhere is she\b/i, `where is ${subject}`)
+    .replace(/\bwhere are they\b/i, `where is ${subject}`)
+    .replace(/\bwhat is his\b/i, `what is ${subject}'s`)
+    .replace(/\bwhat are his\b/i, `what are ${subject}'s`)
+    .replace(/\bwhat is her\b/i, `what is ${subject}'s`)
+    .replace(/\bwhat are her\b/i, `what are ${subject}'s`)
+    .replace(/\bwhat is their\b/i, `what is ${subject}'s`)
+    .replace(/\bwhy should we hire him\b/i, `why should we hire ${subject}`)
+    .replace(/\bwhy should we hire her\b/i, `why should we hire ${subject}`)
+    .replace(/\bhe\b/gi, subject)
+    .replace(/\bhim\b/gi, subject)
+    .replace(/\bhis\b/gi, `${subject}'s`)
+    .replace(/\bshe\b/gi, subject)
+    .replace(/\bher\b/gi, `${subject}'s`)
+    .replace(/\btheir\b/gi, `${subject}'s`)
+    .replace(/\bthem\b/gi, subject);
+}
+
+function isAmbiguousPronounQuestion(question, history = []) {
+  const msg = String(question || '').toLowerCase();
+  if (!/\b(he|his|him|she|her|they|their|them)\b/.test(msg)) return false;
+  if (resolveQuestionSubject(question, history)) return false;
+  if (/\b(dominique|dominik|igiraneza)\b/.test(msg)) return false;
+  return true;
+}
+
+function getRecentUserMessages(history, limit = 4) {
+  if (!Array.isArray(history) || !history.length) return [];
+  return history
+    .filter((item) => item && item.role === 'user' && item.content)
+    .slice(-limit)
+    .map((item) => String(item.content).trim())
+    .filter(Boolean);
+}
+
+function buildPracticalContext(question, history = []) {
+  const current = String(question || '').trim();
+  const recentUsers = getRecentUserMessages(history, 3);
+  return [...recentUsers, current].join(' ').toLowerCase();
+}
+
+function classifyPracticalNeed(text) {
+  const msg = String(text || '').toLowerCase();
+  if (!msg) return '';
+  const asksHelp = /\b(help|solve|fix|handle|deal with|what should i do|advise|advice|guide|support)\b/.test(msg);
+  const conflict = /\b(conflict|disagreement|argue|argument|fight|misunderstanding|problem between|issue between|quarrel|dispute)\b/.test(msg);
+  const money = /\b(money|payment|debt|loan|owed|owe|salary|rent|repay|repayment|cash|finance|financial)\b/.test(msg);
+  const decision = /\b(choose|decision|which one|which option|pick|select|between two options)\b/.test(msg);
+  const stress = /\b(stress|anxiety|overwhelmed|sad|depressed|angry|upset|afraid)\b/.test(msg);
+  const relationship = /\b(friend|family|partner|wife|husband|girlfriend|boyfriend|sibling|parent|relative)\b/.test(msg);
+  const work = /\b(work|job|boss|manager|team|colleague|coworker|office|employee|staff)\b/.test(msg);
+
+  if (conflict && money) return 'money-conflict';
+  if (conflict && work) return 'work-conflict';
+  if (conflict && relationship) return 'relationship-conflict';
+  if (conflict) return 'general-conflict';
+  if (decision) return 'decision';
+  if (stress) return 'stress-support';
+  if (asksHelp) return 'general-help';
+  return '';
+}
+
+function buildPracticalGuidance(question, history = []) {
+  const context = buildPracticalContext(question, history);
+  const need = classifyPracticalNeed(context);
+  if (!need) return '';
+
+  if (need === 'money-conflict') {
+    return [
+      'Yes. Treat it as a money dispute first, not a personal fight.',
+      '1. Ask each person separately what amount they believe is involved and why.',
+      '2. Check facts: messages, receipts, transfers, dates, and any witnesses.',
+      '3. Bring them together and focus only on points both agree on first.',
+      '4. Write the exact disagreement clearly: amount, reason, and what each person wants.',
+      '5. If money is owed, agree a repayment plan with dates and put it in writing.',
+      '6. If they still cannot agree, use a neutral mediator or trusted third party.',
+    ].join('\n');
+  }
+
+  if (need === 'work-conflict') {
+    return [
+      'Yes. For a work conflict, keep it factual and professional.',
+      '1. Separate the people from the issue and identify the exact disagreement.',
+      '2. Let each person explain their side without interruption.',
+      '3. Focus on impact, responsibilities, deadlines, and evidence, not blame.',
+      '4. Agree on one practical next step and document it.',
+      '5. If the issue continues, involve a manager or neutral mediator early.',
+    ].join('\n');
+  }
+
+  if (need === 'relationship-conflict' || need === 'general-conflict') {
+    return [
+      'Yes. Start by lowering emotion and clarifying the real issue.',
+      '1. Let each person explain what happened and what they want now.',
+      '2. Identify what is fact, what is assumption, and what is emotion.',
+      '3. Restate the shared goal, then discuss the one point causing the conflict.',
+      '4. Agree on one fair action each person will take next.',
+      '5. If the conversation becomes hostile, pause and continue later with a neutral person present.',
+    ].join('\n');
+  }
+
+  if (need === 'decision') {
+    return [
+      'Yes. A simple decision framework works well here.',
+      '1. List your options clearly.',
+      '2. Write the main benefits, risks, cost, and timing of each option.',
+      '3. Decide which factor matters most right now.',
+      '4. Choose the option that best fits that priority, not the perfect option.',
+    ].join('\n');
+  }
+
+  if (need === 'stress-support') {
+    return [
+      'Yes. Start by reducing pressure before solving the whole problem.',
+      '1. Pause and name the exact issue causing the stress.',
+      '2. Separate what you can control now from what you cannot.',
+      '3. Pick one small next action for today.',
+      '4. If the situation is heavy or persistent, speak to a trusted person or professional support.',
+    ].join('\n');
+  }
+
+  if (need === 'general-help') {
+    return [
+      'Yes. I can help.',
+      'Tell me these three things:',
+      '1. What exactly happened',
+      '2. What outcome you want',
+      '3. What is blocking you right now',
+      'Then I will give a direct step-by-step answer.',
+    ].join('\n');
+  }
+
+  return '';
+}
+
 function getGeminiModelCandidates() {
   const seen = new Set();
   const stableDefaults = [
@@ -346,7 +546,60 @@ function getGeminiModelCandidates() {
     if (!model || seen.has(model)) return false;
     seen.add(model);
     return true;
-  }).slice(0, 2);
+  }).slice(0, MAX_GEMINI_MODELS);
+}
+
+async function queryAnthropic(prompt, maxTokens = CONFIG.hfMaxTokens, modelName = CONFIG.anthropicModel) {
+  const endpoint = 'https://api.anthropic.com/v1/messages';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ANTHROPIC_REQUEST_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': CONFIG.anthropicApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: modelName,
+        max_tokens: maxTokens,
+        temperature: CONFIG.hfTemperature,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const body = await response.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch (_) {
+    parsed = body;
+  }
+
+  if (!response.ok) {
+    const msg =
+      typeof parsed === 'object' && parsed && parsed.error && parsed.error.message
+        ? String(parsed.error.message)
+        : `Anthropic request failed with status ${response.status}.`;
+    throw new Error(msg);
+  }
+
+  const blocks = Array.isArray(parsed && parsed.content) ? parsed.content : [];
+  const text = blocks
+    .map((block) => (block && block.type === 'text' && typeof block.text === 'string' ? block.text : ''))
+    .join(' ')
+    .trim();
+
+  if (!text) {
+    throw new Error('Anthropic returned empty text.');
+  }
+  return cleanModelReply(text);
 }
 
 async function queryGemini(prompt, maxTokens = CONFIG.hfMaxTokens, modelName = CONFIG.geminiModel) {
@@ -354,9 +607,9 @@ async function queryGemini(prompt, maxTokens = CONFIG.hfMaxTokens, modelName = C
     modelName
   )}:generateContent?key=${encodeURIComponent(CONFIG.geminiApiKey)}`;
   let lastError = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 1; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CONFIG.hfTimeoutMs);
+    const timeout = setTimeout(() => controller.abort(), GEMINI_REQUEST_TIMEOUT_MS);
     let response;
     try {
       response = await fetch(endpoint, {
@@ -442,10 +695,10 @@ async function queryHuggingFace(prompt, maxTokens = CONFIG.hfMaxTokens) {
     `https://api-inference.huggingface.co/models/${encodeURIComponent(CONFIG.hfModel)}`,
   ];
   const errors = [];
-  const requestTimeoutMs = Math.min(CONFIG.hfTimeoutMs, 7000);
+  const requestTimeoutMs = HF_REQUEST_TIMEOUT_MS;
 
   for (const endpoint of endpoints) {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < 1; attempt += 1) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
       let response;
@@ -559,6 +812,11 @@ function isQuotaOrRateError(errorMessage) {
   );
 }
 
+function isBillingError(errorMessage) {
+  const text = String(errorMessage || '').toLowerCase();
+  return text.includes('credit balance is too low') || text.includes('billing') || text.includes('purchase credits');
+}
+
 function isHfPermissionError(errorMessage) {
   const text = String(errorMessage || '').toLowerCase();
   return text.includes('insufficient permissions') || text.includes('authentication method does not have sufficient permissions');
@@ -581,6 +839,40 @@ function resolveMaxTokensForQuestion(question) {
   ];
   const wantsLong = longFormSignals.some((signal) => msg.includes(signal));
   return wantsLong ? Math.max(CONFIG.hfMaxTokens, 560) : CONFIG.hfMaxTokens;
+}
+
+function isCreativeOrOpenEndedPrompt(question) {
+  const msg = String(question || '').toLowerCase().trim();
+  if (!msg) return false;
+  return (
+    /^(write|draft|compose|create|generate|brainstorm|suggest|give me|make)\b/.test(msg) ||
+    /\b(poem|story|limerick|speech|email|letter|caption|tagline|headline|bio|script|joke|plan|proposal|cover letter)\b/.test(msg)
+  );
+}
+
+function isAdviceOrReasoningPrompt(question) {
+  const msg = String(question || '').toLowerCase().trim();
+  if (!msg) return false;
+  return (
+    /\b(help me|can you help|what should i do|how do i|how can i|advise|advice|guide me|solve this|solve that)\b/.test(msg) ||
+    /\b(compare|difference between|pros and cons|advantages and disadvantages|why should|should i|best way)\b/.test(msg)
+  );
+}
+
+function shouldPreferCloudGeneral(question, history = []) {
+  const msg = String(question || '').trim();
+  if (!msg) return false;
+  if (isAmbiguousPronounQuestion(msg, history)) return false;
+  if (tryNativeUtilityAnswer(msg)) return false;
+  if (buildPracticalGuidance(msg, history)) return false;
+  if (tryRuleBasedGeneralAnswer(msg)) return false;
+  if (isCreativeOrOpenEndedPrompt(msg) || isAdviceOrReasoningPrompt(msg)) return true;
+
+  const lower = msg.toLowerCase();
+  const wordCount = lower.split(/\s+/).filter(Boolean).length;
+  const explanatoryPrompt = /^(what|why|how|who|when|where|explain|describe|define|tell me about)\b/.test(lower);
+  if (explanatoryPrompt && wordCount >= 4) return true;
+  return wordCount >= 8;
 }
 
 function scoreChunkAgainstQuestion(question, chunk) {
@@ -636,17 +928,49 @@ function extractContextAnswer(question, contextChunks) {
   return answer.length > 360 ? `${answer.slice(0, 357)}...` : answer;
 }
 
-function extractProfileAnswerFromData(question) {
+function extractProfileAnswerFromData(question, history = []) {
   const msg = String(question || '').toLowerCase();
   const profile = knowledge && knowledge.profile ? knowledge.profile : {};
+  const pronounRefersToDominique = /\b(he|his|him)\b/.test(msg) && historyMentionsDominique(history);
+  const explicitDominique = /\b(dominique|dominik|igiraneza)\b/.test(msg);
+  const refersToDominique = explicitDominique || pronounRefersToDominique;
 
-  if (/\b(skill|skills|stack|tools?)\b/.test(msg) && Array.isArray(profile.skills) && profile.skills.length) {
+  if (
+    refersToDominique &&
+    (/\bwho is\b/.test(msg) || /\babout\b/.test(msg) || /\bintroduce\b/.test(msg))
+  ) {
+    const name = profile.fullName || 'IGIRANEZA Dominique';
+    const headline = profile.headline || 'Business Analyst and AI professional';
+    const summary = profile.summary || '';
+    const location = profile.contact && profile.contact.location ? ` He is based in ${profile.contact.location}.` : '';
+    return `${name} is a ${headline}. ${summary}${location}`.trim();
+  }
+
+  if (
+    (/\b(skill|skills|stack|tools?)\b/.test(msg) || (pronounRefersToDominique && /\bwhat can he do\b/.test(msg))) &&
+    Array.isArray(profile.skills) &&
+    profile.skills.length
+  ) {
     const top = profile.skills.slice(0, 10).join(', ');
     const headline = profile.headline ? `${profile.headline}. ` : '';
     return `${headline}Core skills include ${top}. Main focus: analytics, dashboards, automation, and decision-ready storytelling.`;
   }
 
-  if (/\b(project|projects|portfolio|best project|top project)\b/.test(msg) && Array.isArray(profile.projects) && profile.projects.length) {
+  if (
+    (/\b(project|projects|portfolio|best project|top project)\b/.test(msg) ||
+      (pronounRefersToDominique && /\bproject\b/.test(msg))) &&
+    Array.isArray(profile.projects) &&
+    profile.projects.length
+  ) {
+    const topProject = profile.projects[0];
+    if (/\b(best|top|biggest|flagship)\b/.test(msg) && topProject && topProject.name) {
+      const others = profile.projects
+        .slice(1, 3)
+        .map((p) => p && p.name)
+        .filter(Boolean)
+        .join(', ');
+      return `${profile.fullName || 'Dominique'}'s flagship project is ${topProject.name}${topProject.summary ? ` - ${topProject.summary}` : ''}${others ? ` Other standout projects include ${others}.` : '.'}`;
+    }
     const topProjects = profile.projects
       .slice(0, 4)
       .map((p) => (p && p.name ? `${p.name}${p.summary ? ` - ${p.summary}` : ''}` : ''))
@@ -656,7 +980,7 @@ function extractProfileAnswerFromData(question) {
     }
   }
 
-  if (/\b(contact|email|phone|reach|linkedin)\b/.test(msg) && profile.contact) {
+  if ((/\b(contact|email|phone|reach|linkedin)\b/.test(msg) || (pronounRefersToDominique && /\breach\b/.test(msg))) && profile.contact) {
     const bits = [];
     if (profile.contact.email) bits.push(`email ${profile.contact.email}`);
     if (profile.contact.phone) bits.push(`phone ${profile.contact.phone}`);
@@ -664,7 +988,20 @@ function extractProfileAnswerFromData(question) {
     if (bits.length) return `You can reach Dominique via ${bits.join(', ')}.`;
   }
 
-  if (/\b(experience|work|role|job|worked)\b/.test(msg) && Array.isArray(profile.experience) && profile.experience.length) {
+  if (
+    refersToDominique &&
+    /\b(where|based|location|located)\b/.test(msg) &&
+    profile.contact &&
+    profile.contact.location
+  ) {
+    return `${profile.fullName || 'Dominique'} is based in ${profile.contact.location}.`;
+  }
+
+  if (
+    (/\b(experience|work|role|job|worked)\b/.test(msg) || (pronounRefersToDominique && /\bexperience\b/.test(msg))) &&
+    Array.isArray(profile.experience) &&
+    profile.experience.length
+  ) {
     const roles = profile.experience.slice(0, 3).map((x) => {
       const base = `${x.role || 'Role'} at ${x.company || 'organization'} (${x.period || 'period'})`;
       const highlight =
@@ -674,6 +1011,11 @@ function extractProfileAnswerFromData(question) {
     return `Recent experience: ${roles.join(' | ')}.`;
   }
 
+  if ((/\b(hire|why should we hire)\b/.test(msg) || (pronounRefersToDominique && /\bhire him\b/.test(msg))) && profile) {
+    const strengths = Array.isArray(profile.skills) ? profile.skills.slice(0, 5).join(', ') : 'analytics and data products';
+    return `${profile.fullName || 'Dominique'} is a strong hire because he combines business analysis with hands-on technical delivery. He builds dashboards, analytics products, and decision-ready insights, and he has experience in research, digital transformation support, and executive reporting. Key strengths include ${strengths}.`;
+  }
+
   if (/\b(certification|certifications|certificate)\b/.test(msg) && Array.isArray(profile.certifications) && profile.certifications.length) {
     return `Certifications: ${profile.certifications.join(', ')}.`;
   }
@@ -681,7 +1023,7 @@ function extractProfileAnswerFromData(question) {
   return '';
 }
 
-function isLikelyPortfolioQuery(question, contextChunks) {
+function isLikelyPortfolioQuery(question, contextChunks, history = []) {
   const msg = String(question || '').toLowerCase();
   const strongProfileTerms = [
     'dominique',
@@ -702,7 +1044,13 @@ function isLikelyPortfolioQuery(question, contextChunks) {
   ];
   if (strongProfileTerms.some((term) => msg.includes(term))) return true;
 
-  const personalIntent = /\b(your|you|his|her)\b/.test(msg) && /\b(skill|skills|project|projects|experience|contact|cv|resume|portfolio|background)\b/.test(msg);
+  const portfolioPronounIntent =
+    /\b(his|her|him|he)\b/.test(msg) &&
+    /\b(skill|skills|project|projects|experience|contact|cv|resume|portfolio|background|hire|based|location|located|where)\b/.test(msg);
+  const historyAnchorsToDominique = historyMentionsDominique(history);
+  if (portfolioPronounIntent && historyAnchorsToDominique) return true;
+
+  const personalIntent = /\b(your|you)\b/.test(msg) && /\b(skill|skills|project|projects|experience|contact|cv|resume|portfolio|background|hire|based|location|located|where)\b/.test(msg);
   if (personalIntent) return true;
 
   const shortPortfolioPrompt = /\b(skill|skills|project|projects|experience|contact|portfolio|cv|resume)\b/.test(msg) && msg.split(/\s+/).length <= 4;
@@ -778,18 +1126,9 @@ async function queryDuckDuckGo(question) {
   return '';
 }
 
-async function queryWikipediaSummary(question) {
-  const rawQuestion = String(question || '').trim();
-  if (!rawQuestion) return '';
-
-  const candidate = rawQuestion
-    .replace(/^[\s]*(what|who|when|where|why|how|explain|define|tell me about)\s+/i, '')
-    .replace(/[?]+$/g, '')
-    .trim()
-    .slice(0, 120);
-
+async function queryWikipediaSummaryByTopic(topic) {
+  const candidate = normalizeGeneralTopic(topic).slice(0, 120);
   if (!candidate) return '';
-
   const endpoint = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(candidate)}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1700);
@@ -807,6 +1146,19 @@ async function queryWikipediaSummary(question) {
   }
 }
 
+async function queryWikipediaSummary(question) {
+  return queryWikipediaSummaryByTopic(extractGeneralTopic(question));
+}
+
+function normalizeQuestionText(question) {
+  return String(question || '')
+    .replace(/[,;]\s*(answer|explain|reply)\s+(very\s+)?(quick|quickly|short|briefly)\b/gi, '')
+    .replace(/\b(answer|explain|reply)\s+(very\s+)?(quick|quickly|short|briefly)\b/gi, '')
+    .replace(/\bplease\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function normalizeGeneralTopic(topic) {
   let candidate = String(topic || '')
     .replace(/[?!.]+$/g, '')
@@ -815,6 +1167,8 @@ function normalizeGeneralTopic(topic) {
   if (!candidate) return '';
 
   const lower = candidate.toLowerCase();
+  if (lower === 'ai' || lower === 'a.i') return 'Artificial intelligence';
+  if (lower === 'z test' || lower === 'z-test' || lower === 'ztest') return 'Z-test';
   if (lower === 'space x') return 'SpaceX';
   if (lower === 'usa' || lower === 'us' || lower === 'u.s.a') return 'United States';
   if (lower === 'uk' || lower === 'u.k') return 'United Kingdom';
@@ -822,7 +1176,7 @@ function normalizeGeneralTopic(topic) {
 }
 
 function extractGeneralTopic(question) {
-  const raw = String(question || '').trim();
+  const raw = normalizeQuestionText(question);
   if (!raw) return '';
   const lower = raw.toLowerCase().replace(/[?!.]+$/g, '').trim();
 
@@ -831,16 +1185,44 @@ function extractGeneralTopic(question) {
     return normalizeGeneralTopic(ownerMatch[1]);
   }
 
-  const aboutMatch = lower.match(/\b(?:tell me about|explain|describe)\s+(.+)$/i);
+  const aboutMatch = lower.match(/\b(?:tell me something about|tell me about|explain|describe)\s+(.+)$/i);
   if (aboutMatch && aboutMatch[1]) {
     return normalizeGeneralTopic(aboutMatch[1]);
+  }
+
+  const whatIsMatch = lower.match(/\b(?:what is|what are|who is|define)\s+(.+)$/i);
+  if (whatIsMatch && whatIsMatch[1]) {
+    return normalizeGeneralTopic(whatIsMatch[1]);
   }
 
   return normalizeGeneralTopic(raw);
 }
 
-async function queryWikipediaSearchSummary(question) {
-  const topic = extractGeneralTopic(question);
+function extractComparisonTopics(question) {
+  const raw = normalizeQuestionText(question);
+  if (!raw) return null;
+  const lower = raw.toLowerCase().replace(/[?!.]+$/g, '').trim();
+
+  const differentFrom = lower.match(/\bwhat is\s+(.+?)\s+and\s+how is it different from\s+(.+)$/i);
+  if (differentFrom && differentFrom[1] && differentFrom[2]) {
+    return [normalizeGeneralTopic(differentFrom[1]), normalizeGeneralTopic(differentFrom[2])];
+  }
+
+  const direct = lower.match(/\b(?:difference between|compare)\s+(.+?)\s+(?:and|vs|versus)\s+(.+)$/i);
+  if (direct && direct[1] && direct[2]) {
+    return [normalizeGeneralTopic(direct[1]), normalizeGeneralTopic(direct[2])];
+  }
+
+  const natural = lower.match(/\bwhat is\s+(.+?)\s+(?:and|vs|versus)\s+(.+)$/i);
+  if (natural && natural[1] && natural[2] && /\b(difference|different|compare)\b/.test(lower)) {
+    return [normalizeGeneralTopic(natural[1]), normalizeGeneralTopic(natural[2])];
+  }
+
+  return null;
+}
+
+async function queryWikipediaSearchSummaryByTopic(topic) {
+  topic = normalizeGeneralTopic(topic);
   if (!topic) return '';
 
   const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
@@ -859,14 +1241,15 @@ async function queryWikipediaSearchSummary(question) {
         ? searchPayload.query.search
         : [];
     const title = results[0] && results[0].title ? String(results[0].title) : '';
+    const snippet = results[0] && results[0].snippet ? stripHtmlTags(String(results[0].snippet)) : '';
     if (!title) return '';
 
     const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
     const summaryRes = await fetch(summaryUrl, { method: 'GET' });
-    if (!summaryRes.ok) return '';
+    if (!summaryRes.ok) return snippet || '';
     const summaryPayload = await summaryRes.json();
     const extract = String(summaryPayload && summaryPayload.extract ? summaryPayload.extract : '').trim();
-    if (!extract) return '';
+    if (!extract) return snippet || '';
     return extract.length > GENERAL_REF_MAX_CHARS ? `${extract.slice(0, GENERAL_REF_MAX_CHARS - 3)}...` : extract;
   } catch (_) {
     return '';
@@ -875,22 +1258,70 @@ async function queryWikipediaSearchSummary(question) {
   }
 }
 
-async function queryAnyGeneralReference(question) {
-  const firstNonEmpty = (promise) =>
-    promise.then((value) => {
-      if (!value) throw new Error('empty');
-      return value;
-    });
+async function queryWikipediaSearchSummary(question) {
+  return queryWikipediaSearchSummaryByTopic(extractGeneralTopic(question));
+}
 
-  try {
-    return await Promise.any([
-      firstNonEmpty(queryDuckDuckGo(question)),
-      firstNonEmpty(queryWikipediaSummary(question)),
-      firstNonEmpty(queryWikipediaSearchSummary(question)),
-    ]);
-  } catch (_) {
-    return '';
+async function queryReferenceForTopic(topic) {
+  const direct = await queryWikipediaSummaryByTopic(topic);
+  if (direct) return direct;
+  return queryWikipediaSearchSummaryByTopic(topic);
+}
+
+async function queryAnyGeneralReference(question) {
+  const topic = extractGeneralTopic(question);
+  if (topic) {
+    const reference = await queryReferenceForTopic(topic);
+    if (reference) return reference;
   }
+  return queryDuckDuckGo(question);
+}
+
+function extractLeadSentence(text, maxLen = 260) {
+  const sentences = extractSentences(text);
+  const first = sentences[0] || String(text || '').trim();
+  if (!first) return '';
+  return first.length > maxLen ? `${first.slice(0, maxLen - 3)}...` : first;
+}
+
+async function answerComparisonFromReferences(question) {
+  const topics = extractComparisonTopics(question);
+  if (!topics || topics.length !== 2) return '';
+  const [left, right] = topics;
+  if (!left || !right) return '';
+  const leftRef = await queryReferenceForTopic(left);
+  const rightRef = await queryReferenceForTopic(right);
+  if (!leftRef || !rightRef) return '';
+  const leftLead = extractLeadSentence(leftRef);
+  const rightLead = extractLeadSentence(rightRef);
+  if (!leftLead || !rightLead) return '';
+  return `${left}: ${leftLead} ${right}: ${rightLead} In short, ${left} describes one concept, while ${right} describes a different one.`;
+}
+
+async function answerSubjectAttributeQuestion(question, history = []) {
+  const raw = String(question || '').trim();
+  if (!raw) return '';
+  const subject = resolveQuestionSubject(raw, history);
+  if (!subject) return '';
+  const lower = raw.toLowerCase();
+  const summary = await queryReferenceForTopic(subject);
+  if (!summary) return '';
+  const lead = extractLeadSentence(summary, 320);
+  if (!lead) return '';
+
+  if (/\b(who is|who was)\b/.test(lower)) {
+    return lead;
+  }
+
+  if (/\b(where|from|based|location|located)\b/.test(lower)) {
+    return lead;
+  }
+
+  if (/\b(field|profession|job|work|career|famous for|known for|do)\b/.test(lower)) {
+    return lead;
+  }
+
+  return '';
 }
 
 function stripHtmlTags(html) {
@@ -965,25 +1396,131 @@ function tryRuleBasedGeneralAnswer(question) {
     return "SpaceX was founded by Elon Musk, and he serves as CEO. He is widely recognized as the company's primary owner.";
   }
 
-  if (/\b(rwanda)\b/.test(msg) && /\b(explain|about|country|tell me)\b/.test(msg)) {
-    return 'Rwanda is a landlocked country in East-Central Africa known for strong public safety, rapid digital transformation, and high-altitude green landscapes. Kigali is the capital city. The economy is driven by services, agriculture, tourism, and growing technology initiatives. Rwanda is also known for governance reforms, environmental cleanliness policies, and regional business integration.';
-  }
-
-  if (/\bcapital\b/.test(msg) && /\brwanda\b/.test(msg)) {
-    return 'The capital city of Rwanda is Kigali.';
+  const mathMatch = msg.match(/^\s*(-?\d+(?:\.\d+)?)\s*([\+\-\*x\/])\s*(-?\d+(?:\.\d+)?)\s*\??$/);
+  if (mathMatch) {
+    const a = Number(mathMatch[1]);
+    const op = mathMatch[2];
+    const b = Number(mathMatch[3]);
+    if (op === '+') return `${a + b}`;
+    if (op === '-') return `${a - b}`;
+    if (op === '*' || op === 'x') return `${a * b}`;
+    if (op === '/') return b === 0 ? 'Division by zero is undefined.' : `${a / b}`;
   }
 
   return '';
 }
 
-async function smartFallbackReply(question, contextChunks, providerErrors) {
+function tryConversationalReply(question) {
+  const msg = String(question || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!msg) return '';
+
+  if (/^(hi|hey|hello|yo|good morning|good afternoon|good evening)\b/.test(msg)) {
+    return 'Hi. Ask me anything about Dominique or any general topic.';
+  }
+
+  if (/\bhow are you\b/.test(msg) || /\bhow r you\b/.test(msg)) {
+    return 'I am well and ready to help. Ask me a portfolio question or any general question.';
+  }
+
+  if (/\bthank you\b|\bthanks\b|\bappreciate it\b/.test(msg)) {
+    return 'You are welcome. Send the next question when you are ready.';
+  }
+
+  if (/^(ok|okay|fine|alright|cool|nice)\b/.test(msg) && msg.split(/\s+/).length <= 4) {
+    return 'Understood. Send the next question when you are ready.';
+  }
+
+  if (/\bwho are you\b|\bwhat are you\b/.test(msg)) {
+    return 'I am Dominik AI Assistant. I can answer portfolio questions about Dominique and many general questions too.';
+  }
+
+  return '';
+}
+
+function buildFastBestEffortReply(question) {
+  const cleaned = String(question || '').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  if (isCreativeOrOpenEndedPrompt(cleaned)) {
+    return 'I can help with that. Tell me the tone, length, or audience you want, and I will draft it directly.';
+  }
+  if (isAdviceOrReasoningPrompt(cleaned)) {
+    return 'I can help with that. Share the exact situation or goal, and I will give a direct step-by-step answer.';
+  }
+  const topic = extractGeneralTopic(cleaned);
+  if (!topic) return '';
+
+  if (/^(what is|what are|define|meaning of|explain)\b/i.test(cleaned)) {
+    return `${topic} is a topic I can explain. Ask about its meaning, uses, examples, or differences, and I will answer directly.`;
+  }
+
+  if (/^(how|why)\b/i.test(cleaned)) {
+    return `I can answer that. Add the exact topic or context you want, and I will give a direct explanation.`;
+  }
+
+  return `Ask about ${topic} in a bit more detail, and I will answer clearly and directly.`;
+}
+
+async function tryFastLocalGeneralAnswer(question, history = []) {
   const message = String(question || '').trim();
-  const wordCount = message.split(/\s+/).filter(Boolean).length;
-  const nativeAnswer = tryNativeUtilityAnswer(message);
+  if (!message) return '';
+  const resolvedMessage = rewritePronounQuestion(message, history);
+  const lower = resolvedMessage.toLowerCase();
+  const conversationalReply = tryConversationalReply(message);
+  if (conversationalReply) return conversationalReply;
+  const nativeAnswer = tryNativeUtilityAnswer(resolvedMessage);
   if (nativeAnswer) return nativeAnswer;
 
-  if (isLikelyPortfolioQuery(message, contextChunks)) {
-    const directAnswer = extractProfileAnswerFromData(message);
+  const practicalGuidance = buildPracticalGuidance(message, history);
+  if (practicalGuidance) return practicalGuidance;
+
+  const subjectAttributeAnswer = await answerSubjectAttributeQuestion(message, history);
+  if (subjectAttributeAnswer) return subjectAttributeAnswer;
+
+  const comparisonAnswer = await answerComparisonFromReferences(resolvedMessage);
+  if (comparisonAnswer) return comparisonAnswer;
+
+  const ruleBased = tryRuleBasedGeneralAnswer(resolvedMessage);
+  if (ruleBased) return ruleBased;
+
+  const isCodeRequest = /\b(code|function|script|python|javascript|sql|java|c\+\+|algorithm)\b/i.test(lower);
+  if (isCodeRequest) {
+    try {
+      const stack = await queryStackOverflow(resolvedMessage);
+      if (stack) return stack;
+    } catch (_) {
+      // Ignore and continue.
+    }
+  }
+
+  const looksFactual = /(\?|what|why|how|when|where|define|explain|describe|about|meaning|difference|vs|example|capital|convert|calculate|who|which)/i.test(
+    resolvedMessage
+  );
+  if (looksFactual) {
+    if (isAmbiguousPronounQuestion(message, history)) {
+      return 'Please mention the person or subject you mean, so I can answer accurately.';
+    }
+    try {
+      const externalAnswer = await queryAnyGeneralReference(resolvedMessage);
+      if (externalAnswer) return externalAnswer;
+    } catch (_) {
+      // Ignore and continue.
+    }
+  }
+
+  return '';
+}
+
+async function smartFallbackReply(question, contextChunks, providerErrors, history = []) {
+  const message = String(question || '').trim();
+  const resolvedMessage = rewritePronounQuestion(message, history);
+  const wordCount = message.split(/\s+/).filter(Boolean).length;
+  const conversationalReply = tryConversationalReply(message);
+  if (conversationalReply) return conversationalReply;
+  const nativeAnswer = tryNativeUtilityAnswer(resolvedMessage);
+  if (nativeAnswer) return nativeAnswer;
+
+  if (isLikelyPortfolioQuery(message, contextChunks, history)) {
+    const directAnswer = extractProfileAnswerFromData(message, history);
     if (directAnswer) return directAnswer;
     const profileAnswer = extractContextAnswer(message, contextChunks);
     if (profileAnswer) return profileAnswer;
@@ -993,39 +1530,33 @@ async function smartFallbackReply(question, contextChunks, providerErrors) {
     return 'Hi. Ask me anything about Dominique or any general topic.';
   }
 
-  const lower = message.toLowerCase();
-  const isSmallTalk =
-    /\b(hello|hi|hey|good morning|good afternoon|good evening|how are you|thank you|thanks)\b/i.test(lower) &&
-    wordCount <= 8;
-  if (isSmallTalk) {
-    if (/\bhow are you\b/i.test(lower)) {
-      return 'I am doing well, thank you. Ask me anything and I will help.';
-    }
-    return 'Hello. I am here and ready to help.';
-  }
+  const lower = resolvedMessage.toLowerCase();
 
-  const looksFactual = /(\?|what|why|how|when|where|define|explain|meaning|difference|vs|example|capital|convert|calculate|who|which)/i.test(
-    message
+  const looksFactual = /(\?|what|why|how|when|where|define|explain|describe|about|meaning|difference|vs|example|capital|convert|calculate|who|which)/i.test(
+    resolvedMessage
   );
+  if (looksFactual && isAmbiguousPronounQuestion(message, history)) {
+    return 'Please mention the person or subject you mean, so I can answer accurately.';
+  }
 
   const isCodeRequest = /\b(code|function|script|python|javascript|sql|java|c\+\+|algorithm)\b/i.test(lower);
   if (isCodeRequest) {
     try {
-      const stack = await queryStackOverflow(message);
+      const stack = await queryStackOverflow(resolvedMessage);
       if (stack) return stack;
     } catch (_) {
       // Continue to other fallback behavior.
     }
   }
 
-  const conversationalShape = wordCount <= 5 && /\byou\b/i.test(message) && !message.includes('?');
+  const conversationalShape = wordCount <= 5 && /\byou\b/i.test(resolvedMessage) && !resolvedMessage.includes('?');
   if (conversationalShape) {
     return 'I can help with portfolio questions and general questions. Ask a specific question and I will answer clearly.';
   }
 
   if (looksFactual && !conversationalShape) {
     try {
-      const externalAnswer = await queryAnyGeneralReference(message);
+      const externalAnswer = await queryAnyGeneralReference(resolvedMessage);
       if (externalAnswer) return externalAnswer;
     } catch (_) {
       // Ignore external source failures and continue.
@@ -1034,41 +1565,81 @@ async function smartFallbackReply(question, contextChunks, providerErrors) {
     if (ruleBased) return ruleBased;
   }
 
-  if (providerErrors && providerErrors.length && !isLikelyPortfolioQuery(message, contextChunks)) {
-    const ruleBased = tryRuleBasedGeneralAnswer(message);
+  if (providerErrors && providerErrors.length && !isLikelyPortfolioQuery(message, contextChunks, history)) {
+    const ruleBased = tryRuleBasedGeneralAnswer(resolvedMessage);
     if (ruleBased) return ruleBased;
-    return 'Cloud AI providers are temporarily unavailable. I can still answer portfolio questions and many factual questions. Ask again, and I will give the best available answer.';
+    const bestEffort = buildFastBestEffortReply(resolvedMessage);
+    if (bestEffort) return bestEffort;
+    return 'Ask a more specific question and I will answer it directly.';
   }
-  return 'Ask a specific question and I will answer concisely.';
+  return buildFastBestEffortReply(resolvedMessage) || 'Ask a specific question and I will answer directly.';
 }
 
 async function queryBestProvider(question, history, contextChunks) {
-  const mode = isLikelyPortfolioQuery(question, contextChunks) ? 'portfolio' : 'general';
+  const mode = isLikelyPortfolioQuery(question, contextChunks, history) ? 'portfolio' : 'general';
   const prompt = buildPrompt({ question, history, contextChunks, mode });
-  const retryPrompt = `${prompt}\n\nIMPORTANT: Return a complete final answer. Do not stop mid-sentence.`;
   const maxTokens = resolveMaxTokensForQuestion(question);
   const errors = [];
-  const directLocal = mode === 'portfolio' ? extractProfileAnswerFromData(question) : '';
+  const preferCloudGeneral = mode === 'general' && shouldPreferCloudGeneral(question, history);
+  const directLocal = mode === 'portfolio' ? extractProfileAnswerFromData(question, history) : '';
   if (directLocal) {
     return { reply: directLocal, provider: 'fallback-local', model: '', errors };
+  }
+  const conversationalReply = mode === 'general' ? tryConversationalReply(question) : '';
+  if (conversationalReply) {
+    return { reply: conversationalReply, provider: 'fallback-local', model: '', errors };
   }
   const quickGeneral = mode === 'general' ? tryRuleBasedGeneralAnswer(question) : '';
   if (quickGeneral) {
     return { reply: quickGeneral, provider: 'fallback-local', model: '', errors };
   }
 
+  if (mode === 'general' && !preferCloudGeneral) {
+    const fastLocalGeneral = await tryFastLocalGeneralAnswer(question, history);
+    if (fastLocalGeneral) {
+      return { reply: fastLocalGeneral, provider: 'fallback-local', model: '', errors };
+    }
+  }
+
   const now = Date.now();
+  const anthropicBlocked = providerState.anthropicCooldownUntil > now;
   const geminiBlocked = providerState.geminiCooldownUntil > now;
   const hfBlocked = providerState.hfCooldownUntil > now;
 
+  if (CONFIG.anthropicApiKey && !anthropicBlocked) {
+    try {
+      const reply = await queryAnthropic(prompt, maxTokens, CONFIG.anthropicModel);
+      if (reply && !looksTruncatedReply(reply, question)) {
+        return { reply, provider: 'anthropic', model: CONFIG.anthropicModel, errors };
+      }
+      throw new Error('Anthropic returned incomplete response.');
+    } catch (error) {
+      const message = toErrorMessage(error);
+      logProviderFailure('Anthropic', error);
+      errors.push(`Anthropic: ${compactErrorMessage(message, 220)}`);
+      if (isBillingError(message)) {
+        providerState.anthropicCooldownUntil = Date.now() + 30 * 60 * 1000;
+      } else if (isQuotaOrRateError(message)) {
+        providerState.anthropicCooldownUntil = Date.now() + 45 * 1000;
+      } else {
+        providerState.anthropicCooldownUntil = Date.now() + 20 * 1000;
+      }
+    }
+  } else if (anthropicBlocked) {
+    const sec = Math.max(1, Math.ceil((providerState.anthropicCooldownUntil - now) / 1000));
+    const reason = `cooling down for ${sec}s due to recent failures`;
+    logProviderFailure('Anthropic', new Error(reason));
+    errors.push(`Anthropic: ${reason}`);
+  } else {
+    const reason = 'not configured';
+    logProviderFailure('Anthropic', new Error(reason));
+    errors.push(`Anthropic: ${reason}`);
+  }
+
   if (CONFIG.geminiApiKey && !geminiBlocked) {
     try {
-      let gem = await queryGeminiWithFallback(prompt, maxTokens, question);
-      let reply = gem.reply;
-      if (!reply) {
-        gem = await queryGeminiWithFallback(retryPrompt, maxTokens, question);
-        reply = gem.reply;
-      }
+      const gem = await queryGeminiWithFallback(prompt, maxTokens, question);
+      const reply = gem.reply;
       if (reply) return { reply, provider: 'gemini', model: gem.modelName, errors };
       throw new Error('Gemini returned empty response.');
     } catch (error) {
@@ -1095,10 +1666,7 @@ async function queryBestProvider(question, history, contextChunks) {
 
   if (CONFIG.hfToken && !hfBlocked) {
     try {
-      let reply = await queryHuggingFace(prompt, maxTokens);
-      if (looksTruncatedReply(reply, question)) {
-        reply = await queryHuggingFace(retryPrompt, maxTokens);
-      }
+      const reply = await queryHuggingFace(prompt, maxTokens);
       if (looksTruncatedReply(reply, question)) {
         throw new Error('incomplete response');
       }
@@ -1125,19 +1693,32 @@ async function queryBestProvider(question, history, contextChunks) {
     errors.push(`HuggingFace: ${reason}`);
   }
 
-  const localReply = await smartFallbackReply(question, contextChunks, errors);
+  if (mode === 'general' && preferCloudGeneral) {
+    const fastLocalGeneral = await tryFastLocalGeneralAnswer(question, history);
+    if (fastLocalGeneral) {
+      return { reply: fastLocalGeneral, provider: 'fallback-local', model: '', errors };
+    }
+  }
+
+  const localReply = await smartFallbackReply(question, contextChunks, errors, history);
   if (localReply) {
     return { reply: localReply, provider: 'fallback-local', model: '', errors };
   }
 
-  const fatal = new Error(AI_UNAVAILABLE_MESSAGE);
+  const fatal = new Error('Ask a more specific question and I will answer directly.');
   fatal.statusCode = 503;
   fatal.providerErrors = errors;
   throw fatal;
 }
 
-function getCacheKey(message) {
-  return `${CONFIG.geminiModel}|${CONFIG.hfModel}|${String(message || '').trim().toLowerCase()}`;
+function getCacheKey(message, history = []) {
+  const historyKey = Array.isArray(history)
+    ? history
+        .slice(-2)
+        .map((item) => `${item && item.role ? item.role : 'x'}:${String(item && item.content ? item.content : '').trim().toLowerCase()}`)
+        .join('|')
+    : '';
+  return `${CACHE_SCHEMA_VERSION}|${CONFIG.anthropicModel}|${CONFIG.geminiModel}|${CONFIG.hfModel}|${String(message || '').trim().toLowerCase()}|${historyKey}`;
 }
 
 function readCache(cacheKey) {
@@ -1212,12 +1793,15 @@ async function handleApi(req, res, pathname) {
       ok: true,
       service: 'Dominik AI Assistant',
       models: {
+        anthropic: CONFIG.anthropicModel,
         gemini: CONFIG.geminiModel,
         huggingface: CONFIG.hfModel,
       },
       providers: {
+        anthropicConfigured: Boolean(CONFIG.anthropicApiKey),
         geminiConfigured: Boolean(CONFIG.geminiApiKey),
         hfConfigured: Boolean(CONFIG.hfToken),
+        anthropicCooldownSeconds: Math.max(0, Math.ceil((providerState.anthropicCooldownUntil - Date.now()) / 1000)),
         geminiCooldownSeconds: Math.max(0, Math.ceil((providerState.geminiCooldownUntil - Date.now()) / 1000)),
         hfCooldownSeconds: Math.max(0, Math.ceil((providerState.hfCooldownUntil - Date.now()) / 1000)),
         geminiCandidates: getGeminiModelCandidates(),
@@ -1227,14 +1811,16 @@ async function handleApi(req, res, pathname) {
   }
 
   if (pathname === '/api/chat' && req.method === 'POST') {
+    let message = '';
+    let history = [];
     try {
       const body = await parseJsonBody(req);
-      const message = String(body.message || '').trim();
-      const history = Array.isArray(body.history) ? body.history : [];
+      message = String(body.message || '').trim();
+      history = Array.isArray(body.history) ? body.history : [];
 
       if (!message) return sendJson(res, 400, { error: 'message is required.' });
       const dynamic = isDynamicQuery(message);
-      const cacheKey = getCacheKey(message);
+      const cacheKey = getCacheKey(message, history);
       const cached = dynamic ? null : readCache(cacheKey);
       if (cached) return sendJson(res, 200, { reply: cached, cached: true });
 
@@ -1258,8 +1844,9 @@ async function handleApi(req, res, pathname) {
         console.warn('[AI][chat] request failed:', toErrorMessage(error));
       }
 
-      const safeMessage = statusCode === 503 ? AI_UNAVAILABLE_MESSAGE : 'Failed to generate response.';
-      return sendJson(res, statusCode, { error: safeMessage });
+      const fallbackReply = message ? await smartFallbackReply(message, selectRelevantChunks(message), providerErrors, history) : '';
+      const safeMessage = fallbackReply || (statusCode === 503 ? 'Ask a more specific question and I will answer directly.' : 'Failed to generate response.');
+      return sendJson(res, 200, { reply: safeMessage, provider: 'fallback-local', model: '' });
     }
   }
 
@@ -1304,8 +1891,10 @@ if (require.main === module) {
   const server = createServer();
   server.listen(CONFIG.port, CONFIG.host, () => {
     console.log(`Dominik AI Assistant server running at http://localhost:${CONFIG.port}`);
+    console.log(`Anthropic model: ${CONFIG.anthropicModel}`);
     console.log(`Gemini model: ${CONFIG.geminiModel}`);
     console.log(`Hugging Face model: ${CONFIG.hfModel}`);
+    console.log(`Anthropic key configured: ${CONFIG.anthropicApiKey ? 'yes' : 'no'}`);
     console.log(`Gemini key configured: ${CONFIG.geminiApiKey ? 'yes' : 'no'}`);
     console.log(`HF token configured: ${CONFIG.hfToken ? 'yes' : 'no'}`);
     console.log(
