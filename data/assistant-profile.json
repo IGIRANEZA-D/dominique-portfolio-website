@@ -59,6 +59,26 @@
   ],
   "projects": [
     {
+      "name": "Ubuzima Intelligence Platform",
+      "stack": ["React", "Firebase", "Supabase", "AI Triage", "Health Tech"],
+      "summary": "National-scale healthcare intelligence platform for Rwanda with live patient tracking, outbreak alerts, bed monitoring, resource dashboards, and role-based access."
+    },
+    {
+      "name": "Smart Export Analytics",
+      "stack": ["R Shiny", "Export Analytics", "Live Demo"],
+      "summary": "Interactive export intelligence product for strategic performance interpretation, live exploration, and decision-ready storytelling."
+    },
+    {
+      "name": "Sales Dashboard Analysis",
+      "stack": ["R Shiny", "Interactive UI", "Analytics Workspace"],
+      "summary": "R Shiny analytics workspace built for presentation, exploration, and decision-ready insight delivery."
+    },
+    {
+      "name": "Sales and Profit Performance Matrix",
+      "stack": ["Excel", "Category Performance", "Profit Matrix"],
+      "summary": "Executive matrix for annual sales and profitability movement across categories, states, and customer behavior."
+    },
+    {
       "name": "Store Sales Intelligence Command Center",
       "stack": ["Power BI", "Revenue Monitoring", "Profit Diagnostics"],
       "summary": "Multi-regional command center for commercial leadership with category contribution, shipment behavior, quantity movement, and profitability diagnostics."
@@ -67,21 +87,6 @@
       "name": "Retail Outlet KPI Cockpit",
       "stack": ["Excel", "Outlet Analysis", "KPI Cockpit"],
       "summary": "KPI cockpit for outlet performance, item behavior, and category structure with fast filtering for daily management."
-    },
-    {
-      "name": "Sales and Profit Performance Matrix",
-      "stack": ["Excel", "Category Performance", "Profit Matrix"],
-      "summary": "Executive matrix for annual sales and profitability movement across categories, states, and customer behavior."
-    },
-    {
-      "name": "Sales Insights Interactive Workspace",
-      "stack": ["R Shiny", "Interactive UI", "Analytic Workspace"],
-      "summary": "Interactive workspace with guided analytic navigation and policy-facing interpretation."
-    },
-    {
-      "name": "Smart Export Analytics",
-      "stack": ["R Shiny", "Export Analytics", "Live Demo"],
-      "summary": "Live product focused on export analytics and strategic performance interpretation."
     }
   ],
   "certifications": [
